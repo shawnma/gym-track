@@ -253,7 +253,7 @@ function buildWidget(state) {
   g.colors = [BG_TOP(), BG_BOT()];
   g.locations = [0, 1];
   w.backgroundGradient = g;
-  w.setPadding(14, 16, 14, 16);
+  w.setPadding(14, 20, 14, 16);
 
   const today = todayStr();
   const st = todayStatus(state, today);
