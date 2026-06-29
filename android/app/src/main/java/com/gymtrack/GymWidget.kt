@@ -10,6 +10,8 @@ import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.action.actionRunCallback
+import androidx.glance.appwidget.lazy.LazyColumn
+import androidx.glance.appwidget.lazy.items
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
 import androidx.glance.layout.Column
@@ -57,30 +59,36 @@ class GymWidget : GlanceAppWidget() {
                     fontSize = 18.sp, fontWeight = FontWeight.Bold
                 )
             )
+            if (isTrain && st.kind == Schedule.Kind.OVERDUE) {
+                Spacer(GlanceModifier.height(2.dp))
+                Text(
+                    "(原定 ${st.date}，待补)",
+                    style = TextStyle(color = ColorProvider(Color(0xFFE0A030)), fontSize = 11.sp)
+                )
+            }
+            Spacer(GlanceModifier.height(6.dp))
+
+            // 动作列表占据中间剩余空间并可滚动 (内容多于组件高度时不再被裁掉)，
+            // 完成/顺延按钮始终固定在底部。
             if (isTrain) {
-                if (st.kind == Schedule.Kind.OVERDUE) {
-                    Spacer(GlanceModifier.height(2.dp))
-                    Text(
-                        "(原定 ${st.date}，待补)",
-                        style = TextStyle(color = ColorProvider(Color(0xFFE0A030)), fontSize = 11.sp)
-                    )
-                }
-                Spacer(GlanceModifier.height(6.dp))
-                st.day.exercises.forEach { ex ->
-                    Row(GlanceModifier.padding(bottom = 2.dp)) {
-                        Text("${ex.tier} ", style = TextStyle(
-                            color = ColorProvider(Color(0xFF9A9AB0)), fontSize = 11.sp, fontWeight = FontWeight.Medium))
-                        Text("${ex.lift}  ${ex.scheme}", style = TextStyle(
-                            color = ColorProvider(Color.White), fontSize = 12.sp))
+                LazyColumn(GlanceModifier.fillMaxWidth().defaultWeight()) {
+                    items(st.day.exercises) { ex ->
+                        Row(GlanceModifier.padding(bottom = 3.dp)) {
+                            Text("${ex.tier} ", style = TextStyle(
+                                color = ColorProvider(Color(0xFF9A9AB0)), fontSize = 12.sp, fontWeight = FontWeight.Medium))
+                            Text("${ex.lift}  ${ex.scheme}", style = TextStyle(
+                                color = ColorProvider(Color.White), fontSize = 13.sp))
+                        }
                     }
                 }
             } else {
-                Spacer(GlanceModifier.height(4.dp))
-                Text("下次 周${WD[Schedule.weekdayIndex(st.date)]} ${st.date} · ${st.day.name}",
-                    style = TextStyle(color = ColorProvider(Color(0xFF34C759)), fontSize = 13.sp))
+                Column(GlanceModifier.fillMaxWidth().defaultWeight()) {
+                    Text("下次 周${WD[Schedule.weekdayIndex(st.date)]} ${st.date} · ${st.day.name}",
+                        style = TextStyle(color = ColorProvider(Color(0xFF34C759)), fontSize = 13.sp))
+                }
             }
 
-            Spacer(GlanceModifier.height(10.dp))
+            Spacer(GlanceModifier.height(8.dp))
             Row(GlanceModifier.fillMaxWidth()) {
                 Button(text = "✅ 完成", onClick = actionRunCallback<CompleteAction>())
                 Spacer(GlanceModifier.width(8.dp))
