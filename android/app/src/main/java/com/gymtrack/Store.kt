@@ -30,7 +30,22 @@ object Store {
                     HistoryEntry(h.getString("date"), h.getString("dayName"))
                 }
             } ?: emptyList()
-            State(wd, idx, next, hist)
+            // 课表：存在就读，否则回退出厂课表 (兼容旧数据 / iOS 版没有该字段)
+            val prog = o.optJSONArray("program")?.let { a ->
+                (0 until a.length()).mapNotNull { i ->
+                    runCatching {
+                        val dj = a.getJSONObject(i)
+                        val exA = dj.optJSONArray("exercises")
+                        val ex = if (exA == null) emptyList() else (0 until exA.length()).map { k ->
+                            val ej = exA.getJSONObject(k)
+                            Exercise(ej.optString("tier"), ej.optString("lift"), ej.optString("scheme"))
+                        }
+                        ProgramDay(dj.optString("id"), dj.optString("name"), ex)
+                    }.getOrNull()
+                }
+            }?.takeIf { it.isNotEmpty() } ?: Gzclp.program
+            if (idx >= prog.size) idx = 0
+            State(wd, idx, next, hist, prog)
         } catch (e: Exception) {
             Schedule.defaultState(today)
         }
@@ -44,6 +59,15 @@ object Store {
         val ha = JSONArray()
         s.history.forEach { ha.put(JSONObject().put("date", it.date).put("dayName", it.dayName)) }
         o.put("history", ha)
+        val pa = JSONArray()
+        s.program.forEach { day ->
+            val ea = JSONArray()
+            day.exercises.forEach { ex ->
+                ea.put(JSONObject().put("tier", ex.tier).put("lift", ex.lift).put("scheme", ex.scheme))
+            }
+            pa.put(JSONObject().put("id", day.id).put("name", day.name).put("exercises", ea))
+        }
+        o.put("program", pa)
         file(c).writeText(o.toString(2))
     }
 

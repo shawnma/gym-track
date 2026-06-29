@@ -12,12 +12,14 @@ data class Exercise(val tier: String, val lift: String, val scheme: String)
 data class ProgramDay(val id: String, val name: String, val exercises: List<Exercise>)
 data class HistoryEntry(val date: String, val dayName: String)
 
-// 进度状态 (持久化的部分)。课表 program 由代码定义，不存盘。
+// 进度状态 (持久化)。课表 program 也存进数据，可在 App 里编辑；
+// 缺省时回退到 Gzclp.program (出厂课表)。
 data class State(
     val weekdays: Set<Int>,        // 0=周日 1=周一 ... 6=周六 (默认一三五)
     val programIndex: Int,         // 下一次练 program 里的第几个 (0..N-1)
     val nextDate: LocalDate,       // 下一次待办日期
-    val history: List<HistoryEntry>
+    val history: List<HistoryEntry>,
+    val program: List<ProgramDay> = Gzclp.program  // 课表 (可编辑)
 )
 
 // ── GZCLP 课表 (改这里即生效；与 iOS 版 DEFAULTS.program 保持一致) ───────────
@@ -54,8 +56,6 @@ object Gzclp {
 }
 
 object Schedule {
-    private val N get() = Gzclp.program.size
-
     // java.time: Mon=1..Sun=7 → 取模 7 得到 0=周日..6=周六 (与 JS getDay 一致)
     fun weekdayIndex(d: LocalDate): Int = d.dayOfWeek.value % 7
 
@@ -81,10 +81,10 @@ object Schedule {
 
     // 点「完成」：记录历史 → 指针前进 → 回到固定网格的下一个槽
     fun complete(s: State, today: LocalDate): State {
-        val day = Gzclp.program[s.programIndex]
+        val day = s.program[s.programIndex.coerceIn(0, s.program.lastIndex)]
         return s.copy(
             history = s.history + HistoryEntry(today.toString(), day.name),
-            programIndex = (s.programIndex + 1) % N,
+            programIndex = (s.programIndex + 1) % s.program.size,
             nextDate = nextSlotAfter(today, s.weekdays),
         )
     }
@@ -110,10 +110,10 @@ object Schedule {
     fun computeUpcoming(s: State, count: Int): List<Upcoming> {
         val out = ArrayList<Upcoming>(count)
         var d = s.nextDate
-        var idx = s.programIndex
+        var idx = s.programIndex.coerceIn(0, s.program.lastIndex)
         repeat(count) {
-            out.add(Upcoming(d, Gzclp.program[idx]))
-            idx = (idx + 1) % N
+            out.add(Upcoming(d, s.program[idx]))
+            idx = (idx + 1) % s.program.size
             d = nextSlotAfter(d, s.weekdays)
         }
         return out
@@ -123,7 +123,7 @@ object Schedule {
     data class Status(val kind: Kind, val day: ProgramDay, val date: LocalDate)
 
     fun todayStatus(s: State, today: LocalDate): Status {
-        val day = Gzclp.program[s.programIndex]
+        val day = s.program[s.programIndex.coerceIn(0, s.program.lastIndex)]
         val next = s.nextDate
         return when {
             next.isBefore(today) -> Status(Kind.OVERDUE, day, next)
@@ -142,5 +142,20 @@ object Schedule {
         programIndex = 0,
         nextDate = firstSlotOnOrAfter(today, Gzclp.DEFAULT_WEEKDAYS),
         history = emptyList(),
+        program = Gzclp.program,
     )
+
+    // App 内编辑课表/星期后套用：保证 weekdays 非空、programIndex 在范围内；
+    // 若 weekdays 变了就把 nextDate 重新吸附到新网格上 (从今天起最近的训练日)。
+    fun applyEdits(s: State, today: LocalDate, weekdays: Set<Int>, program: List<ProgramDay>): State {
+        val wd = weekdays.ifEmpty { Gzclp.DEFAULT_WEEKDAYS }
+        val prog = program.ifEmpty { Gzclp.program }
+        val next = if (wd != s.weekdays) firstSlotOnOrAfter(today, wd) else s.nextDate
+        return s.copy(
+            weekdays = wd,
+            program = prog,
+            programIndex = s.programIndex.coerceIn(0, prog.lastIndex),
+            nextDate = next,
+        )
+    }
 }

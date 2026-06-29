@@ -8,6 +8,7 @@ iPhone 版(Scriptable)的 Android 对应实现。**各自独立、不与 iPhone 
 - 小组件显示今天该练哪天 + T1/T2/T3 动作(组×次);休息日显示下次。
 - 点完成 → 指针前进、排下一次;点顺延 → 往后挪一天(撞上下一槽则吸附回网格,保持一三五)。
 - 打开 App 还能看「接下来」列表、重置进度。
+- **App 内编辑课表/训练星期**:首页「✏️ 编辑课表 / 训练星期」可改训练星期、增删训练日、增删/改每个动作(级别/名称/组×次)、调整训练日顺序;保存即写入数据并刷新小组件。改了训练星期会把下一次自动排到最近的新训练日。
 - 调度逻辑与 iOS 版完全一致(同一套算法,已用 25 条断言交叉验证)。
 
 ## 直接装(最快)
@@ -19,8 +20,8 @@ iPhone 版(Scriptable)的 Android 对应实现。**各自独立、不与 iPhone 
 ## 用 Android Studio 构建/改课表
 1. Android Studio **Open** 选 `android/` 目录,等 Gradle Sync(会自动下 Gradle 8.7 / 依赖)。
 2. 连真机或开模拟器,点 ▶︎ Run。
-3. **改课表/动作/训练星期**:编辑 `app/src/main/java/com/gymtrack/Schedule.kt` 里的 `Gzclp`
-   (program 列表 + `DEFAULT_WEEKDAYS`),重新 Run 即生效。课表由代码定义,不存在数据里。
+3. **改课表/动作/训练星期**:直接在 App 首页点「✏️ 编辑课表 / 训练星期」即可,无需改代码。
+   `Schedule.kt` 里的 `Gzclp`(program 列表 + `DEFAULT_WEEKDAYS`)只是**出厂默认**,首次运行或数据缺失时回退用;用户编辑后的课表存进 `gymtrack.json`。
 
 命令行构建(用 Android Studio 自带 JDK):
 ```
@@ -40,11 +41,11 @@ java -jar /tmp/t.jar
 | 文件 | 作用 |
 |------|------|
 | `Schedule.kt` | GZCLP 课表 + 调度纯函数(与 iOS GymTrack.js 同逻辑) |
-| `Store.kt` | 进度持久化(filesDir/gymtrack.json,只存进度) |
+| `Store.kt` | 进度+课表持久化(filesDir/gymtrack.json) |
 | `GymWidget.kt` | Glance 桌面小组件渲染 + 完成/顺延按钮 |
 | `WidgetActions.kt` | 小组件按钮回调(complete / defer) |
 | `GymWidgetReceiver.kt` | AppWidget receiver |
-| `MainActivity.kt` | 打开 App 的界面(状态/接下来/完成/顺延/重置) |
+| `MainActivity.kt` | App 界面:首页(状态/接下来/完成/顺延/重置)+ 编辑课表/星期页 |
 | `test/ScheduleTest.kt` | 纯逻辑自检(独立 kotlinc 跑) |
 
 ## 已知小限制
