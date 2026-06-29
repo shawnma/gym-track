@@ -16,8 +16,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -40,6 +45,43 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 
 private const val WD = "日一二三四五六"
+
+// 家庭杠铃+哑铃可做的常见动作，供编辑时下拉选择 (仍可手动输入其它名称)。
+private val COMMON_LIFTS = listOf(
+    // 杠铃 Barbell
+    "杠铃深蹲 Squat",
+    "杠铃前蹲 Front Squat",
+    "杠铃卧推 Bench",
+    "窄握卧推 Close-Grip Bench",
+    "杠铃推举 OHP",
+    "杠铃硬拉 Deadlift",
+    "罗马尼亚硬拉 RDL",
+    "杠铃俯身划船 Barbell Row",
+    "杠铃臀推 Hip Thrust",
+    "杠铃弯举 Barbell Curl",
+    "杠铃耸肩 Barbell Shrug",
+    "杠铃健腹轮 Barbell Rollout",
+    "杠铃箭步蹲 Barbell Lunge",
+    // 哑铃 Dumbbell
+    "哑铃卧推 DB Bench",
+    "哑铃上斜卧推 DB Incline Press",
+    "哑铃推举 DB Shoulder Press",
+    "哑铃单臂划船 DB One-Arm Row",
+    "哑铃高脚杯深蹲 Goblet Squat",
+    "保加利亚分腿蹲 Bulgarian Split Squat",
+    "哑铃箭步蹲 DB Lunge",
+    "哑铃罗马尼亚硬拉 DB RDL",
+    "哑铃侧平举 Lateral Raise",
+    "哑铃飞鸟 DB Fly",
+    "哑铃俯身飞鸟 Rear Delt Fly",
+    "哑铃弯举 DB Curl",
+    "锤式弯举 Hammer Curl",
+    "哑铃过顶臂屈伸 DB Triceps Ext",
+    "哑铃耸肩 DB Shrug",
+    // 自重 Bodyweight (家庭器械可做)
+    "引体向上 Pull-up",
+    "双杠臂屈伸 Dip",
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -219,11 +261,9 @@ private fun EditScreen(
                         modifier = Modifier.width(72.dp),
                     )
                     Spacer(Modifier.width(6.dp))
-                    OutlinedTextField(
+                    LiftField(
                         value = ex.lift,
                         onValueChange = { v -> updateEx(di, ei) { it.copy(lift = v) } },
-                        label = { Text("动作") },
-                        singleLine = true,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -264,5 +304,43 @@ private fun EditScreen(
             OutlinedButton(onClick = onCancel) { Text("取消") }
         }
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+// 动作名输入框：可手动输入，也可从常见杠铃/哑铃动作下拉里选 (按已输入文字过滤)。
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LiftField(value: String, onValueChange: (String) -> Unit, modifier: Modifier = Modifier) {
+    var expanded by remember { mutableStateOf(false) }
+    val suggestions = if (value.isBlank()) COMMON_LIFTS
+        else COMMON_LIFTS.filter { it.contains(value, ignoreCase = true) && it != value }
+    val open = expanded && suggestions.isNotEmpty()
+
+    ExposedDropdownMenuBox(
+        expanded = open,
+        onExpandedChange = { expanded = it },
+        modifier = modifier,
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = { onValueChange(it); expanded = true },
+            label = { Text("动作") },
+            singleLine = true,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = open) },
+            modifier = Modifier
+                .menuAnchor(MenuAnchorType.PrimaryEditable)
+                .fillMaxWidth(),
+        )
+        ExposedDropdownMenu(
+            expanded = open,
+            onDismissRequest = { expanded = false },
+        ) {
+            suggestions.take(12).forEach { s ->
+                DropdownMenuItem(
+                    text = { Text(s) },
+                    onClick = { onValueChange(s); expanded = false },
+                )
+            }
+        }
     }
 }
