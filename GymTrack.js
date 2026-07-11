@@ -9,7 +9,9 @@
 //  - 主屏小组件：显示今天/明天/后天 该不该练、练哪天、练哪些动作
 //  - 点开小组件 → 弹菜单：完成 / 顺延一天 / 设置
 //  - 状态存 iCloud 文件 gymtrack.json，跨设备同步
-//  - 静态显示动作 (组×次)，重量自己记；不自动进阶 (进阶规则见 README)
+//  - 练的过程中随时点开记/改当天各动作重量 + 轻重感受 (偏轻/合适/偏重)，
+//    与「完成」互相独立；下次训练直接显示上次记录
+//  - 不自动进阶，偏轻↑提示该加重 (进阶规则见 README)
 //
 // 单文件设计：既能在 Scriptable 跑，也能被 Node require 来跑纯函数自检。
 // ============================================================================
@@ -63,6 +65,7 @@ const DEFAULTS = {
   programIndex: 0,      // 下一次练 program 里的第几个 (0..N-1)
   nextDate: null,       // 下一次待办日期 "YYYY-MM-DD"，首次运行时填
   history: [],          // { date, dayName }[]
+  weights: {},          // 重量记录："T1|杠铃深蹲 Squat" → [{date,w,verdict}]，T1/T2 分开记
 };
 
 // ── 1. 日期工具 (纯函数，全部按本地零点处理，避免时区误差) ──────────────────
@@ -164,6 +167,41 @@ function sessionOn(date, upcoming) {
   return hit ? hit.day : null;
 }
 
+// ── 3. 重量记录 (纯函数) ───────────────────────────────────────────────────
+// verdict: "light"=偏轻(下次可加重) / "ok"=合适 / "heavy"=偏重(没完成次数)
+const VERDICT_LABEL = { light: "偏轻", ok: "合适", heavy: "偏重" };
+const VERDICT_ARROW = { light: "↑", ok: "✓", heavy: "↓" };
+
+// 同一动作 T1/T2 是两套独立重量，所以 key 带 tier
+function weightKey(ex) {
+  return `${ex.tier}|${ex.lift}`;
+}
+function lastWeight(state, ex) {
+  const arr = (state.weights || {})[weightKey(ex)];
+  return arr && arr.length ? arr[arr.length - 1] : null;
+}
+function recordWeight(state, ex, weight, verdict, date) {
+  if (!state.weights) state.weights = {};
+  const k = weightKey(ex);
+  const arr = state.weights[k] || (state.weights[k] = []);
+  const entry = { date, w: weight, verdict };
+  // 同一天重复记 = 修改当天记录 (练的过程中可随时改)，不同天才追加
+  if (arr.length && arr[arr.length - 1].date === date) arr[arr.length - 1] = entry;
+  else arr.push(entry);
+  if (arr.length > 30) arr.splice(0, arr.length - 30); // 每个动作最多留 30 条
+  return state;
+}
+// 今天已记的那条 (没有则 null)
+function todayWeight(state, ex, today) {
+  const last = lastWeight(state, ex);
+  return last && last.date === today ? last : null;
+}
+// 上次记录的短文案，如 "135lb↑"；无记录返回 null
+function lastWeightBrief(state, ex) {
+  const last = lastWeight(state, ex);
+  return last ? `${last.w}${state.units}${VERDICT_ARROW[last.verdict] || ""}` : null;
+}
+
 // ============================================================================
 // 以下为 Scriptable 专属 (存储 / 渲染 / 交互)。Node 下 (无 FileManager) 不执行。
 // ============================================================================
@@ -180,6 +218,7 @@ function withDefaults(raw) {
   if (!Array.isArray(s.weekdays) || !s.weekdays.length) s.weekdays = DEFAULTS.weekdays;
   if (s.programIndex == null || s.programIndex >= s.program.length) s.programIndex = 0;
   if (!Array.isArray(s.history)) s.history = [];
+  if (s.weights == null || typeof s.weights !== "object" || Array.isArray(s.weights)) s.weights = {};
   if (!s.nextDate) s.nextDate = firstSlotOnOrAfter(todayStr(), s.weekdays);
   return s;
 }
@@ -220,6 +259,7 @@ function save(state) {
     programIndex: state.programIndex,
     nextDate: state.nextDate,
     history: state.history,
+    weights: state.weights,
   };
   fm.writeString(dataPath(fm), JSON.stringify(persist, null, 2));
 }
@@ -234,8 +274,16 @@ function dayLabel(name) {
   return name == null ? "休息" : name;
 }
 
-// 给 widget 加一行动作："T1 深蹲 Squat  5×3+"
-function addExerciseRow(w, ex, dim) {
+// 上次重量的着色：偏轻→绿(该加重了) / 合适→灰 / 偏重→橙(注意降阶)
+function verdictColor(verdict, dim) {
+  if (dim) return new Color("#6a6a80");
+  if (verdict === "light") return TRAIN_COLOR();
+  if (verdict === "heavy") return new Color("#ff9f0a");
+  return new Color("#9a9ab0");
+}
+
+// 给 widget 加一行动作："T1 深蹲 Squat  5×3+  135lb↑"
+function addExerciseRow(w, ex, dim, state) {
   const row = w.addStack();
   row.centerAlignContent();
   const t = row.addText(ex.tier + " ");
@@ -244,6 +292,12 @@ function addExerciseRow(w, ex, dim) {
   const l = row.addText(`${ex.lift}  ${ex.scheme}`);
   l.font = Font.mediumSystemFont(13);
   l.textColor = dim ? REST_COLOR() : Color.white();
+  const brief = lastWeightBrief(state, ex);
+  if (brief) {
+    const wt = row.addText(`  ${brief}`);
+    wt.font = Font.semiboldSystemFont(12);
+    wt.textColor = verdictColor(lastWeight(state, ex).verdict, dim);
+  }
   w.addSpacer(3);
 }
 
@@ -285,14 +339,14 @@ function buildWidget(state) {
     w.addSpacer(7);
     // 动作：small 只显示 T1；medium/large 显示全部
     const list = family === "small" ? exercises.slice(0, 1) : exercises;
-    for (const ex of list) addExerciseRow(w, ex, false);
+    for (const ex of list) addExerciseRow(w, ex, false, state);
   } else {
     const sub = w.addText(`下次 周${"日一二三四五六"[weekdayOf(st.date)]} ${st.date.slice(5)} · ${st.dayName}`);
     sub.font = Font.mediumSystemFont(13);
     sub.textColor = TRAIN_COLOR();
     w.addSpacer(6);
     const list = family === "small" ? exercises.slice(0, 1) : exercises;
-    for (const ex of list) addExerciseRow(w, ex, true);
+    for (const ex of list) addExerciseRow(w, ex, true, state);
   }
 
   // large：再列出明天、后天
@@ -315,7 +369,7 @@ function buildWidget(state) {
   }
 
   w.addSpacer();
-  const hint = w.addText("点一下 → 完成 / 顺延");
+  const hint = w.addText("点一下 → 记重量 / 完成 / 顺延");
   hint.font = Font.systemFont(10);
   hint.textColor = new Color("#6a6a80");
 
@@ -339,9 +393,13 @@ async function runInteractive(state) {
   else if (st.kind === "overdue") lines.push(`待补 ${st.dayName} (原定 ${st.date})`);
   else if (st.kind === "tomorrow") lines.push(`今天休息 · 明天 ${st.dayName}`);
   else lines.push(`今天休息 · 下次 ${st.date} ${st.dayName}`);
-  // 下一次训练的动作
+  // 下一次训练的动作 (带今天/上次重量)
   for (const ex of (st.day && st.day.exercises) || []) {
-    lines.push(`  ${ex.tier} ${ex.lift} ${ex.scheme}`);
+    const last = lastWeight(state, ex);
+    const tail = last
+      ? ` · ${last.date === today ? "今天" : "上次"}${last.w}${state.units} ${VERDICT_LABEL[last.verdict] || ""}`
+      : "";
+    lines.push(`  ${ex.tier} ${ex.lift} ${ex.scheme}${tail}`);
   }
   lines.push("");
   lines.push("接下来：");
@@ -351,6 +409,7 @@ async function runInteractive(state) {
   }
   a.message = lines.join("\n");
 
+  a.addAction("🏋️ 记重量");
   a.addAction("✅ 完成今天");
   a.addAction("⏭️ 顺延一天");
   a.addDestructiveAction("⚙️ 设置");
@@ -358,18 +417,72 @@ async function runInteractive(state) {
 
   const idx = await a.presentAlert();
   if (idx === 0) {
+    await weightsMenu(state, st.day, today);
+  } else if (idx === 1) {
     complete(state, today);
     save(state);
     await toast(`已完成 · 下次 ${state.nextDate}`);
-  } else if (idx === 1) {
+  } else if (idx === 2) {
     defer(state);
     save(state);
     await toast(`已顺延 · 下次 ${state.nextDate}`);
-  } else if (idx === 2) {
+  } else if (idx === 3) {
     await settingsMenu(state);
   }
   // 退出前更新一次小组件预览
   Script.setWidget(buildWidget(state));
+}
+
+// 记重量主菜单：列出当次训练的动作，点哪个记哪个，可随时进来反复改。
+// 每记一个立即落盘，练到最后忘了也不怕。
+async function weightsMenu(state, day, today) {
+  const exs = (day && day.exercises) || [];
+  if (!exs.length) return;
+  while (true) {
+    const a = new Alert();
+    a.title = `记重量 · ${progName(day)}`;
+    a.message = "点动作记录/修改今天的重量 (随时可再进来改)";
+    for (const ex of exs) {
+      const rec = todayWeight(state, ex, today);
+      const last = lastWeight(state, ex);
+      const tail = rec
+        ? ` — 今天 ${rec.w}${state.units} ${VERDICT_LABEL[rec.verdict] || ""}`
+        : last
+          ? ` — 上次 ${last.w}${state.units} ${VERDICT_LABEL[last.verdict] || ""}`
+          : " — 未记";
+      a.addAction(`${ex.tier} ${ex.lift}${tail}`);
+    }
+    a.addCancelAction("返回");
+    const idx = await a.presentAlert();
+    if (idx === -1) return;
+    await editWeight(state, exs[idx], today);
+    save(state);
+  }
+}
+
+// 单个动作的记录/修改弹框
+async function editWeight(state, ex, today) {
+  const rec = todayWeight(state, ex, today);
+  const last = lastWeight(state, ex);
+  const ref = rec || last; // 预填今天已记的，否则上次的
+  const a = new Alert();
+  a.title = `${ex.tier} ${ex.lift}`;
+  a.message =
+    `${ex.scheme}` +
+    (rec ? `\n今天已记 ${rec.w}${state.units} · ${VERDICT_LABEL[rec.verdict] || ""}` : "") +
+    (last && last !== rec ? `\n上次 ${last.w}${state.units} · ${VERDICT_LABEL[last.verdict] || ""} (${last.date.slice(5)})` : "") +
+    `\n输入重量，再选感觉：`;
+  const tf = a.addTextField(`重量 (${state.units})`, ref ? String(ref.w) : "");
+  if (tf && tf.setDecimalPadKeyboard) tf.setDecimalPadKeyboard();
+  a.addAction("⬆️ 偏轻 (下次加重)");
+  a.addAction("✅ 合适");
+  a.addAction("⬇️ 偏重 (没完成次数)");
+  a.addCancelAction("取消");
+  const idx = await a.presentAlert();
+  if (idx === -1) return;
+  const w = parseFloat(a.textFieldValue(0));
+  if (isNaN(w)) return; // 没填重量就不记
+  recordWeight(state, ex, w, ["light", "ok", "heavy"][idx], today);
 }
 
 async function toast(msg) {
@@ -400,7 +513,7 @@ async function settingsMenu(state) {
 async function resetProgress(state) {
   const a = new Alert();
   a.title = "重置进度？";
-  a.message = "清空训练历史、回到课表第一天、下次设为最近的训练日。\n课表/动作本身不变。";
+  a.message = "清空训练历史、回到课表第一天、下次设为最近的训练日。\n课表/动作与重量记录不变。";
   a.addDestructiveAction("确认重置");
   a.addCancelAction("取消");
   if ((await a.presentAlert()) !== 0) return;
@@ -461,5 +574,6 @@ if (typeof module !== "undefined" && module.exports) {
     parseDate, fmtDate, addDays, weekdayOf, cmp,
     nextSlotAfter, firstSlotOnOrAfter, progName, withDefaults,
     complete, defer, computeUpcoming, todayStatus, sessionOn,
+    VERDICT_LABEL, VERDICT_ARROW, weightKey, lastWeight, recordWeight, lastWeightBrief, todayWeight,
   };
 }

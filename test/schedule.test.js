@@ -139,4 +139,61 @@ console.log("\n[跨周滚动正确性：连练12次日期与程序日对齐]");
   ], "12 次连练：日期始终一三五，program 连续滚动");
 }
 
+console.log("\n[重量记录：T1/T2 分开、取最新一条、上限 30 条]");
+{
+  let s = fresh("2026-06-29", 0);
+  s.weights = {};
+  const t1squat = { tier: "T1", lift: "深蹲 Squat", scheme: "5×3+" };
+  const t2squat = { tier: "T2", lift: "深蹲 Squat", scheme: "3×10" };
+  eq(G.weightKey(t1squat), "T1|深蹲 Squat", "key = tier|lift");
+  eq(G.lastWeight(s, t1squat), null, "无记录 → null");
+  eq(G.lastWeightBrief(s, t1squat), null, "无记录 → brief 为 null");
+
+  G.recordWeight(s, t1squat, 135, "light", "2026-06-29");
+  G.recordWeight(s, t2squat, 95, "ok", "2026-06-29");
+  eq(G.lastWeight(s, t1squat).w, 135, "T1 记 135");
+  eq(G.lastWeight(s, t2squat).w, 95, "T2 独立记 95 (不与 T1 混)");
+
+  G.recordWeight(s, t1squat, 145, "heavy", "2026-07-01");
+  eq(G.lastWeight(s, t1squat), { date: "2026-07-01", w: 145, verdict: "heavy" }, "取最新一条");
+  eq(G.lastWeightBrief(s, t1squat), "145lb↓", "brief = 重量+单位+箭头 (偏重↓)");
+  eq(s.weights["T1|深蹲 Squat"].length, 2, "历史保留多条");
+
+  for (let i = 0; i < 40; i++) G.recordWeight(s, t1squat, 100 + i, "ok", `2026-08-${String(i + 1).padStart(2, "0")}`);
+  eq(s.weights["T1|深蹲 Squat"].length, 30, "每个动作最多留 30 条");
+  eq(G.lastWeight(s, t1squat).w, 139, "截断后最新一条仍正确");
+}
+
+console.log("\n[重量记录：同一天重复记 = 覆盖当天，todayWeight 只认当天]");
+{
+  let s = fresh("2026-06-29", 0);
+  s.weights = {};
+  const ex = { tier: "T1", lift: "深蹲 Squat", scheme: "5×3+" };
+  G.recordWeight(s, ex, 135, "light", "2026-07-04");
+  G.recordWeight(s, ex, 140, "ok", "2026-07-04");
+  G.recordWeight(s, ex, 145, "heavy", "2026-07-04");
+  eq(s.weights["T1|深蹲 Squat"].length, 1, "同一天改 3 次只留 1 条");
+  eq(G.lastWeight(s, ex), { date: "2026-07-04", w: 145, verdict: "heavy" }, "留的是最后一次改的值");
+
+  eq(G.todayWeight(s, ex, "2026-07-04"), { date: "2026-07-04", w: 145, verdict: "heavy" }, "todayWeight 当天 → 返回当天记录");
+  eq(G.todayWeight(s, ex, "2026-07-06"), null, "todayWeight 换天 → null (显示为上次)");
+
+  G.recordWeight(s, ex, 150, "ok", "2026-07-06");
+  eq(s.weights["T1|深蹲 Squat"].length, 2, "换一天记 → 追加新条目，不覆盖历史");
+}
+
+console.log("\n[重量记录：withDefaults 兼容旧 json (无 weights 字段)]");
+{
+  const s = G.withDefaults({ weekdays: [1, 3, 5], programIndex: 0, nextDate: "2026-06-29", history: [] });
+  eq(s.weights, {}, "旧 json 无 weights → 补空对象");
+  const s2 = G.withDefaults({ weights: [1, 2] });
+  eq(s2.weights, {}, "weights 类型不对 → 重置为空对象");
+}
+
+console.log("\n[verdict 文案]");
+{
+  eq(G.VERDICT_LABEL, { light: "偏轻", ok: "合适", heavy: "偏重" }, "中文标签 偏轻/合适/偏重");
+  eq(G.VERDICT_ARROW, { light: "↑", ok: "✓", heavy: "↓" }, "箭头 ↑/✓/↓");
+}
+
 console.log(`\n✅ 全部通过 (${pass} 断言)\n`);
